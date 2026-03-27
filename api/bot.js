@@ -2,23 +2,32 @@ const express = require('express');
 const fetch = require('node-fetch');
 
 const app = express();
+
+// ✅ Разрешаем CORS для всех источников
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  
+  // Обработка preflight-запросов
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.json({ limit: '50mb' }));
 
-// Токен и ID группы (берутся из переменных окружения Vercel)
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const GROUP_ID = process.env.GROUP_ID || '-72662613274024';
 
-// Webhook endpoint для MAX
+// ✅ POST endpoint для приёма отчётов
 app.post('/api/bot', async (req, res) => {
-  const update = req.body;
+  const data = req.body;
+  console.log('📥 Получен отчёт:', JSON.stringify(data, null, 2));
   
-  console.log('📥 Получено событие:', JSON.stringify(update, null, 2));
-  
-  // Обработка события от мини-приложения
-  if (update.event === 'report_submitted' && update.data?.type === 'daily_report') {
-    const { message, photos, user } = update.data;
-    
-    console.log('📝 Новый отчёт от:', user?.first_name || 'Аноним');
+  if (data.type === 'daily_report') {
+    const { message, photos, user } = data;
     
     try {
       // 1. Отправляем текст в группу
@@ -33,64 +42,51 @@ app.post('/api/bot', async (req, res) => {
       });
       
       const textResult = await textResponse.json();
-      console.log('📤 Текст отправлен:', textResult);
+      console.log('📤 Текст:', textResult);
       
       if (!textResult.ok) {
-        throw new Error(textResult.description || 'Ошибка отправки текста');
+        throw new Error(textResult.description || 'Ошибка текста');
       }
       
-      // 2. Отправляем фото (если есть)
+      // 2. Отправляем фото
       if (photos && photos.length > 0) {
-        console.log(`📷 Отправка ${photos.length} фото...`);
-        
         for (let i = 0; i < photos.length; i++) {
           try {
-            const photoBase64 = photos[i];
-            const base64Image = photoBase64.replace(/^image\/\w+;base64,/, '');
+            const base64Image = photos[i].replace(/^image\/\w+;base64,/, '');
             const buffer = Buffer.from(base64Image, 'base64');
-            
             const formData = new FormData();
             formData.append('chat_id', GROUP_ID);
             formData.append('photo', buffer, `photo_${i}.jpg`);
             
-            const photoResponse = await fetch(`https://platform-api.max.ru/bot/${BOT_TOKEN}/sendPhoto`, {
+            await fetch(`https://platform-api.max.ru/bot/${BOT_TOKEN}/sendPhoto`, {
               method: 'POST',
               body: formData
             });
-            
-            const photoResult = await photoResponse.json();
-            console.log(`📤 Фото ${i+1} отправлено:`, photoResult.ok);
-            
-          } catch (photoError) {
-            console.error(`⚠️ Фото ${i+1} не отправлено:`, photoError.message);
+          } catch (e) {
+            console.log(`⚠️ Фото ${i+1}: ${e.message}`);
           }
         }
       }
       
-      console.log('✅ Отчёт успешно отправлен в группу!');
+      console.log('✅ Отчёт отправлен в группу');
       
     } catch (error) {
-      console.error('❌ Ошибка отправки:', error.message);
+      console.error('❌ Ошибка:', error.message);
     }
   }
   
-  // Всегда отвечаем OK
   res.json({ ok: true });
 });
 
-// Health check
+// ✅ GET endpoint для проверки
 app.get('/api/bot', (req, res) => {
   res.json({ status: 'ok', message: 'Бот работает!' });
 });
 
-// Экспортируем app для Vercel
 module.exports = app;
 
-// Запускаем сервер только если не в Vercel
 if (!process.env.VERCEL) {
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
-    console.log(`🤖 Бот запущен на порту ${PORT}`);
-    console.log(`📍 Webhook: http://localhost:${PORT}/api/bot`);
+  app.listen(process.env.PORT || 3000, () => {
+    console.log('🤖 Бот запущен');
   });
 }
