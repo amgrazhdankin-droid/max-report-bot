@@ -1,0 +1,16 @@
+{
+  "name": "max-report-bot",
+  "version": "1.0.0",
+  "description": "Бот для отправки отчётов в группу MAX",
+  "main": "api/bot.js",
+  "scripts": {
+    "start": "node api/bot.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "node-fetch": "^2.7.0"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
