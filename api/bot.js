@@ -4,7 +4,7 @@ const fetch = require('node-fetch');
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
-// CORS для мини-приложения
+// CORS
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -16,41 +16,62 @@ app.use((req, res, next) => {
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const GROUP_ID = process.env.GROUP_ID || '-72662613274024';
 
-// ✅ Webhook от MAX (получаем события от мини-приложения)
 app.post('/api/bot', async (req, res) => {
-  const update = req.body;
-  console.log('📥 Получено обновление:', JSON.stringify(update, null, 2));
+  const data = req.body;
+  console.log('📥 Получен отчёт:', JSON.stringify(data, null, 2));
   
-  // Проверяем, что это данные от мини-приложения
-  if (update.type === 'daily_report' || update.event === 'report_submitted') {
-    const data = update.data || update;
+  if (data.type === 'daily_report') {
+    const message = data.message;
     
     try {
-      // 🎯 ОТПРАВКА ЧЕРЕЗ MAX API (ПРАВИЛЬНЫЙ ФОРМАТ)
-      // Используем правильный endpoint для MAX
-      const message = data.message;
+      // 🎯 ПЫТАЕМСЯ РАЗНЫЕ ФОРМАТЫ MAX API
       
-      // Отправляем в группу через MAX
-      const response = await fetch(`https://platform-api.max.ru/v1/messages`, {
+      // Формат 1: v1/messages
+      let response = await fetch(`https://platform-api.max.ru/v1/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${BOT_TOKEN}`
         },
         body: JSON.stringify({
-          chat_id: GROUP_ID,
-          text: message,
-          parse_mode: 'Markdown'
+          chatId: GROUP_ID,
+          text: message
         })
       });
       
+      // Формат 2: bot/sendMessage (как Telegram, но другой base URL)
+      if (!response.ok) {
+        response = await fetch(`https://api.max.ru/bot/${BOT_TOKEN}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: GROUP_ID,
+            text: message,
+            parse_mode: 'Markdown'
+          })
+        });
+      }
+      
+      // Формат 3: platform-api с другим путём
+      if (!response.ok) {
+        response = await fetch(`https://platform-api.max.ru/bot/${BOT_TOKEN}/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: GROUP_ID,
+            text: message
+          })
+        });
+      }
+      
       const result = await response.json();
-      console.log('📊 Результат:', result);
+      console.log('📊 Статус:', response.status);
+      console.log('📄 Ответ:', result);
       
       if (response.ok) {
-        console.log('✅ Отчёт отправлен в группу!');
+        console.log('✅ Отправлено!');
       } else {
-        console.log('⚠️ Ошибка API:', result);
+        console.log('❌ Ошибка API MAX:', result);
       }
       
     } catch (error) {
@@ -61,15 +82,8 @@ app.post('/api/bot', async (req, res) => {
   res.json({ ok: true });
 });
 
-// Health check
 app.get('/api/bot', (req, res) => {
   res.json({ status: 'ok', message: 'Бот работает!' });
 });
 
 module.exports = app;
-
-if (!process.env.VERCEL) {
-  app.listen(process.env.PORT || 3000, () => {
-    console.log('🤖 Бот запущен на порту', process.env.PORT || 3000);
-  });
-}
