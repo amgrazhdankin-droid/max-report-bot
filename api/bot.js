@@ -14,7 +14,7 @@ app.use((req, res, next) => {
 });
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const GROUP_ID = process.env.GROUP_ID || '-72662613274024';
+const GROUP_ID = process.env.GROUP_ID || '72662613274024';
 
 console.log('🚀 Бот запущен');
 console.log('🔑 Token:', BOT_TOKEN ? BOT_TOKEN.substring(0, 20) + '...' : 'НЕ ЗАДАН!');
