@@ -4,7 +4,7 @@ const fetch = require('node-fetch');
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
-// CORS
+// CORS для мини-приложения
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -14,12 +14,12 @@ app.use((req, res, next) => {
 });
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const GROUP_ID = process.env.GROUP_ID || '72662613274024';
+const GROUP_ID = process.env.GROUP_ID || '-72662613274024';
 
-console.log('🚀 Бот запущен');
+console.log('🚀 Бот запущен на Vercel');
 console.log('🔑 Token:', BOT_TOKEN ? BOT_TOKEN.substring(0, 20) + '...' : 'НЕ ЗАДАН!');
-console.log('📬 Group ID:', GROUP_ID, `(тип: ${typeof GROUP_ID})`);
 
+// ✅ Webhook от мини-приложения
 app.post('/api/bot', async (req, res) => {
   const data = req.body;
   
@@ -33,39 +33,80 @@ app.post('/api/bot', async (req, res) => {
   
   const { message, photos, user } = data;
   
-  // 🎯 ОТПРАВЛЯЕМ В ГРУППУ (не пользователю!)
-  // ВАЖНО: используем строку
-  const chatId = String(GROUP_ID);
+  // 🎯 ОТПРАВЛЯЕМ В ГРУППУ
+  // ВАЖНО: chat_id передаётся в URL как query-параметр!
+  const chatId = GROUP_ID;
+  const apiUrl = `https://platform-api.max.ru/messages?chat_id=${encodeURIComponent(chatId)}`;
   
-  console.log('📬 Отправка в чат:', chatId, `(тип: ${typeof chatId})`);
-  
-  const requestBody = {
-    chat_id: chatId,
-    text: message,
-    format: 'markdown'
-  };
-  
-  console.log('📤 Тело запроса:', JSON.stringify(requestBody));
+  console.log('📬 Отправка в чат:', chatId);
+  console.log('🌐 API URL:', apiUrl);
   
   try {
-    const response = await fetch('https://platform-api.max.ru/messages', {
+    // 🎯 ПРАВИЛЬНЫЙ MAX API
+    console.log('\n📤 Отправляем текст через MAX API...');
+    
+    const textResponse = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': BOT_TOKEN
+        'Authorization': BOT_TOKEN  // ← Токен в заголовке!
       },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify({
+        text: message,
+        format: 'markdown'  // Поддержка Markdown
+      })
     });
     
-    const result = await response.json();
-    console.log('📊 Статус:', response.status);
-    console.log('📄 Ответ API:', JSON.stringify(result, null, 2));
+    const textResult = await textResponse.json();
+    console.log('📊 Статус ответа:', textResponse.status);
+    console.log('📄 Ответ API:', JSON.stringify(textResult, null, 2));
     
-    if (!response.ok) {
-      throw new Error(result.message || `HTTP ${response.status}`);
+    if (!textResponse.ok) {
+      throw new Error(textResult.message || `HTTP ${textResponse.status}`);
     }
     
-    console.log('✅ Отчёт отправлен в группу!');
+    console.log('✅ Текст отправлен!');
+    
+    // 📷 Отправка фото (если есть)
+    if (photos && photos.length > 0) {
+      console.log(`\n📷 Отправляем ${photos.length} фото...`);
+      
+      for (let i = 0; i < photos.length; i++) {
+        try {
+          const photoBase64 = photos[i];
+          // Убираем префикс data:image/jpeg;base64,
+          const base64Image = photoBase64.replace(/^data:image\/\w+;base64,/, '');
+          const buffer = Buffer.from(base64Image, 'base64');
+          
+          // Создаём FormData для отправки файла
+          const formData = new FormData();
+          formData.append('chat_id', chatId);
+          formData.append('photo', buffer, {
+            filename: `photo_${i}.jpg`,
+            contentType: 'image/jpeg'
+          });
+          
+          console.log(`📤 Фото ${i+1}: отправка...`);
+          
+          const photoResponse = await fetch(`https://platform-api.max.ru/messages?chat_id=${encodeURIComponent(chatId)}`, {
+            method: 'POST',
+            headers: {
+              'Authorization': BOT_TOKEN
+              // ❗ Не указываем Content-Type — fetch сам добавит boundary для FormData
+            },
+            body: formData
+          });
+          
+          const photoResult = await photoResponse.json();
+          console.log(`📊 Фото ${i+1}: статус ${photoResponse.status}`, photoResult);
+          
+        } catch (photoError) {
+          console.log(`⚠️ Фото ${i+1} не отправлено:`, photoError.message);
+        }
+      }
+    }
+    
+    console.log('\n✅ ========== ОТЧЁТ УСПЕШНО ОТПРАВЛЕН В ГРУППУ! ==========');
     
   } catch (error) {
     console.error('\n❌ ========== ОШИБКА ==========');
@@ -77,22 +118,22 @@ app.post('/api/bot', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ✅ Health check
 app.get('/api/bot', (req, res) => {
   res.json({ 
     status: 'ok', 
     message: 'Бот работает!',
-    config: {
-      tokenSet: !!BOT_TOKEN,
-      groupId: GROUP_ID,
-      groupIdType: typeof GROUP_ID
-    }
+    timestamp: new Date().toISOString()
   });
 });
 
+// ✅ Экспорт для Vercel
 module.exports = app;
 
+// 🖥️ Локальный запуск
 if (!process.env.VERCEL) {
-  app.listen(process.env.PORT || 3000, () => {
-    console.log(`🤖 Бот запущен на порту ${process.env.PORT || 3000}`);
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`🤖 Бот запущен на порту ${PORT}`);
   });
 }
