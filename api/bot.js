@@ -14,7 +14,10 @@
         chatId = user?.id?.toString();
         console.log('⚠️ Отправляем автору отчёта:', chatId);
       }
-      
+            console.log('🔍 Отладка получателя:');
+      console.log('   - Исходный GROUP_ID:', GROUP_ID);
+      console.log('   - Используется chat_id:', chatId);
+      console.log('   - Автор отчёта ID:', user?.id);
       console.log('📬 Отправка в чат:', chatId);
       
       // 2. Отправляем текст
