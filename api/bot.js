@@ -25,7 +25,14 @@ export default async function handler(req, res) {
 
   try {
     const { message, photos, user, type } = req.body;
-    
+    // 🔧 ВРЕМЕННАЯ ОТЛАДКА - удалите после фикса
+console.log('🔍 DEBUG bot.js:', {
+  hasMessage: !!message,
+  messagePreview: message?.substring(0, 30),
+  envChatId: process.env.MAX_GROUP_CHAT_ID,
+  envChatIdType: typeof process.env.MAX_GROUP_CHAT_ID,
+  hasToken: !!process.env.MAX_BOT_TOKEN
+});
     if (!message || !GROUP_CHAT_ID) {
       return res.status(400).json({ ok: false, error: 'Missing required fields' });
     }
