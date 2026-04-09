@@ -1,139 +1,160 @@
-const express = require('express');
-const fetch = require('node-fetch');
+// api/bot.js
+const MAX_API = 'https://platform-api.max.ru';
+const BOT_TOKEN = process.env.MAX_BOT_TOKEN;      // Добавьте в Vercel Environment Variables
+const GROUP_CHAT_ID = process.env.MAX_GROUP_CHAT_ID; // ID группы, куда отправлять отчёты
 
-const app = express();
-app.use(express.json({ limit: '50mb' }));
+export const config = {
+  api: {
+    bodyParser: { sizeLimit: '10mb' }, // Важно для приёма фото
+  },
+};
 
-// CORS для мини-приложения
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
-  next();
-});
-
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const GROUP_ID = process.env.GROUP_ID || '-72662613274024';
-
-console.log('🚀 Бот запущен на Vercel');
-console.log('🔑 Token:', BOT_TOKEN ? BOT_TOKEN.substring(0, 20) + '...' : 'НЕ ЗАДАН!');
-
-// ✅ Webhook от мини-приложения
-app.post('/api/bot', async (req, res) => {
-  const data = req.body;
+export default async function handler(req, res) {
+  // Разрешаем CORS только для вашего домена
+  res.setHeader('Access-Control-Allow-Origin', 'https://amgrazhdankin-droid.github.io');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
-  console.log('\n📥 ========== НОВЫЙ ЗАПРОС ==========');
-  console.log('📥 Получены данные:', JSON.stringify(data, null, 2));
-  
-  if (data.type !== 'daily_report') {
-    console.log('⚠️ Не отчёт, пропускаем');
-    return res.json({ ok: true });
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
   }
   
-  const { message, photos, user } = data;
-  
-  // 🎯 ОТПРАВЛЯЕМ В ГРУППУ
-  // ВАЖНО: chat_id передаётся в URL как query-параметр!
-  const chatId = GROUP_ID;
-  const apiUrl = `https://platform-api.max.ru/messages?chat_id=${encodeURIComponent(chatId)}`;
-  
-  console.log('📬 Отправка в чат:', chatId);
-  console.log('🌐 API URL:', apiUrl);
-  
+  if (req.method !== 'POST') {
+    return res.status(405).json({ ok: false, error: 'Method not allowed' });
+  }
+
   try {
-    // 🎯 ПРАВИЛЬНЫЙ MAX API
-    console.log('\n📤 Отправляем текст через MAX API...');
+    const { message, photos, user, type } = req.body;
     
-    const textResponse = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': BOT_TOKEN  // ← Токен в заголовке!
-      },
-      body: JSON.stringify({
-        text: message,
-        format: 'markdown'  // Поддержка Markdown
-      })
-    });
-    
-    const textResult = await textResponse.json();
-    console.log('📊 Статус ответа:', textResponse.status);
-    console.log('📄 Ответ API:', JSON.stringify(textResult, null, 2));
-    
-    if (!textResponse.ok) {
-      throw new Error(textResult.message || `HTTP ${textResponse.status}`);
+    if (!message || !GROUP_CHAT_ID) {
+      return res.status(400).json({ ok: false, error: 'Missing required fields' });
     }
-    
-    console.log('✅ Текст отправлен!');
-    
-    // 📷 Отправка фото (если есть)
-    if (photos && photos.length > 0) {
-      console.log(`\n📷 Отправляем ${photos.length} фото...`);
-      
-      for (let i = 0; i < photos.length; i++) {
-        try {
-          const photoBase64 = photos[i];
-          // Убираем префикс data:image/jpeg;base64,
-          const base64Image = photoBase64.replace(/^data:image\/\w+;base64,/, '');
-          const buffer = Buffer.from(base64Image, 'base64');
-          
-          // Создаём FormData для отправки файла
-          const formData = new FormData();
-          formData.append('chat_id', chatId);
-          formData.append('photo', buffer, {
-            filename: `photo_${i}.jpg`,
-            contentType: 'image/jpeg'
-          });
-          
-          console.log(`📤 Фото ${i+1}: отправка...`);
-          
-          const photoResponse = await fetch(`https://platform-api.max.ru/messages?chat_id=${encodeURIComponent(chatId)}`, {
-            method: 'POST',
-            headers: {
-              'Authorization': BOT_TOKEN
-              // ❗ Не указываем Content-Type — fetch сам добавит boundary для FormData
-            },
-            body: formData
-          });
-          
-          const photoResult = await photoResponse.json();
-          console.log(`📊 Фото ${i+1}: статус ${photoResponse.status}`, photoResult);
-          
-        } catch (photoError) {
-          console.log(`⚠️ Фото ${i+1} не отправлено:`, photoError.message);
+
+    // 1. Загружаем фотографии (если есть)
+    const attachments = [];
+    if (photos?.length > 0) {
+      for (const base64 of photos) {
+        const attachment = await uploadImage(base64);
+        if (attachment) {
+          attachments.push(attachment);
         }
       }
     }
+
+    // 2. Формируем и отправляем сообщение
+    const result = await sendMessage(GROUP_CHAT_ID, message, attachments);
     
-    console.log('\n✅ ========== ОТЧЁТ УСПЕШНО ОТПРАВЛЕН В ГРУППУ! ==========');
+    return res.status(200).json({ ok: true, messageId: result.message?.mid });
     
   } catch (error) {
-    console.error('\n❌ ========== ОШИБКА ==========');
-    console.error('❌ Сообщение:', error.message);
-    console.error('❌ Stack:', error.stack);
-    console.error('========================================\n');
+    console.error('❌ Bot error:', error);
+    return res.status(500).json({ 
+      ok: false, 
+      error: error.message || 'Internal server error' 
+    });
+  }
+}
+
+// 🔹 Загрузка изображения
+async function uploadImage(base64Data) {
+  try {
+    // Удаляем префикс data:image/jpeg;base64,
+    const base64 = base64Data.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64, 'base64');
+
+    // Шаг 1: Получаем URL для загрузки
+    const uploadUrlRes = await fetch(`${MAX_API}/uploads?type=image`, {
+      method: 'POST',
+      headers: {
+        'Authorization': BOT_TOKEN,
+      },
+    });
+    
+    if (!uploadUrlRes.ok) {
+      throw new Error(`Failed to get upload URL: ${uploadUrlRes.status}`);
+    }
+    
+    const { url } = await uploadUrlRes.json();
+    
+    // Шаг 2: Загружаем файл по полученному URL (multipart/form-data)
+    const formData = new FormData();
+    const blob = new Blob([buffer], { type: 'image/jpeg' });
+    formData.append('data', blob, `report_${Date.now()}.jpg`);
+    
+    const uploadRes = await fetch(url, {
+      method: 'POST',
+      body: formData,
+      // Не передаём заголовок Content-Type — браузер/FormData сам установит границу
+    });
+    
+    if (!uploadRes.ok) {
+      const errText = await uploadRes.text();
+      throw new Error(`Upload failed: ${uploadRes.status} ${errText}`);
+    }
+    
+    const retval = await uploadRes.json();
+    
+    // Шаг 3: Возвращаем объект вложения для сообщения
+    return {
+      type: 'image',
+      payload: retval // Содержит token/attachment_id для MAX API
+    };
+    
+  } catch (error) {
+    console.error('❌ Image upload error:', error);
+    return null; // Пропускаем фото с ошибкой, но продолжаем отправку
+  }
+}
+
+// 🔹 Отправка сообщения
+async function sendMessage(chatId, text, attachments = []) {
+  const payload = {
+    text: text,
+    attachments: attachments.length > 0 ? attachments : undefined,
+    format: 'markdown', // Включаем поддержку *жирного* и _курсива_
+    notify: true,
+  };
+
+  // Пробуем отправить с повторами на случай "attachment.not.ready"
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${MAX_API}/messages?chat_id=${chatId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': BOT_TOKEN,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+      
+      const result = await res.json();
+      
+      if (!res.ok) {
+        // Если вложение ещё не обработано — ждём и пробуем снова
+        if (result.code === 'attachment.not.ready' && attempt < 2) {
+          await sleep(1000 * (attempt + 1)); // Экспоненциальная задержка
+          continue;
+        }
+        throw new Error(result.message || `API error: ${res.status}`);
+      }
+      
+      return result;
+      
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) {
+        await sleep(1500);
+        continue;
+      }
+      throw lastError;
+    }
   }
   
-  res.json({ ok: true });
-});
+  throw lastError;
+}
 
-// ✅ Health check
-app.get('/api/bot', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    message: 'Бот работает!',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// ✅ Экспорт для Vercel
-module.exports = app;
-
-// 🖥️ Локальный запуск
-if (!process.env.VERCEL) {
-  const PORT = process.env.PORT || 3000;
-  app.listen(PORT, () => {
-    console.log(`🤖 Бот запущен на порту ${PORT}`);
-  });
+// Вспомогательная функция задержки
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
