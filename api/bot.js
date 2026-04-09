@@ -11,7 +11,7 @@ export const config = {
 
 export default async function handler(req, res) {
   // Разрешаем CORS только для вашего домена
-  res.setHeader('Access-Control-Allow-Origin', 'https://amgrazhdankin-droid.github.io');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   
